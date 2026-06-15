@@ -1,4 +1,5 @@
 import argparse
+import io
 import json
 import os
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from typing import Iterable, List, Optional
 @dataclass
 class ScanOptions:
     """Runtime options for an image scan session."""
+
     patterns: List[str]
     limit: Optional[int]
     ocr: bool
@@ -65,14 +67,13 @@ def _scan_barcodes(image) -> List[str]:
     return results
 
 
-def _scan_gcv(image, client) -> dict:
+def _scan_gcv(image_bytes: bytes, client) -> dict:
     """Run Google Cloud Vision label/logo/text detection."""
     if client is None:
         return {}
     from google.cloud.vision import Image as VisionImage
 
-    content = image.tobytes()
-    payload = VisionImage(content=content)
+    payload = VisionImage(content=image_bytes)
 
     labels = client.label_detection(image=payload).label_annotations
     logos = client.logo_detection(image=payload).logo_annotations
@@ -89,7 +90,9 @@ def scan_image(path: str, options: ScanOptions, gcv_client) -> dict:
     """Scan an image file and return structured results."""
     from PIL import Image
 
-    image = Image.open(path)
+    with open(path, "rb") as handle:
+        image_bytes = handle.read()
+    image = Image.open(io.BytesIO(image_bytes))
     result = {
         "path": path,
         "ocr": None,
@@ -104,7 +107,7 @@ def scan_image(path: str, options: ScanOptions, gcv_client) -> dict:
         result["barcodes"] = _scan_barcodes(image)
 
     if options.gcv:
-        result["gcv"] = _scan_gcv(image, gcv_client)
+        result["gcv"] = _scan_gcv(image_bytes, gcv_client)
 
     return result
 
@@ -113,7 +116,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Scan images for OCR and barcodes")
     parser.add_argument("path", help="Directory containing images")
-    parser.add_argument("--pattern", action="append", default=["*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff"])
+    parser.add_argument(
+        "--pattern",
+        action="append",
+        default=["*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff"],
+    )
     parser.add_argument("--limit", type=int)
     parser.add_argument("--ocr", action="store_true", default=True)
     parser.add_argument("--no-ocr", action="store_false", dest="ocr")
